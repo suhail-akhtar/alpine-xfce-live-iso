@@ -101,7 +101,6 @@ networkmanager-openvpn
 wpa_supplicant
 wpa_supplicant-openrc
 plymouth
-plymout-themes
 firefox
 pulseaudio
 pulseaudio-alsa
@@ -112,7 +111,10 @@ alsaconf
 alsa-utils
 alsa-lib
 pavucontrol
-
+doas
+networkmanager-dnsmasq
+breeze-plymouth
+wireless-tools
 EOF
 
 rc_add devfs sysinit
@@ -144,6 +146,19 @@ rc_add wpa_supplicant boot
 rc_add networkmanager default
 rc_add dbus default
 rc_add alsa default
+rc_add local default
+
+
+mkdir -p "$tmp"/etc/apk
+makefile root:root 0644 "$tmp"/etc/apk/repositories <<EOF
+/media/cdrom/apkss
+https://dl-cdn.alpinelinux.org/alpine/edge/main
+https://dl-cdn.alpinelinux.org/alpine/edge/community
+EOF
+
+mkdir -p "$tmp"/etc/doas.d
+cp /etc/doas.d/doas.conf "$tmp"/etc/doas.d/
+chmod 0644 "$tmp"/etc/doas.d
 
 mkdir -p "$tmp"/etc/NetworkManager
 makefile root:root 0644 "$tmp"/etc/NetworkManager/NetworkManager.conf <<EOF
@@ -156,8 +171,30 @@ plugins=ifupdown,keyfile
 managed=true
 
 [device]
-wifi.scan-rand-mac-address=yes
-wifi.backend=wpa_supplicant
+wifi.scan-rand-mac-address=no
+#wifi.backend=wpa_supplicant
+
+EOF
+
+# Add the setup-wifi script to rc.local to run on boot
+mkdir -p "$tmp"/etc/local.d
+makefile root:root 0755 "$tmp"/etc/local.d/setup-wifi.start <<EOF
+#!/bin/sh
+
+# Ensure Wi-Fi is not blocked
+rfkill unblock wifi
+
+# Restart NetworkManager to apply changes
+rc-service networkmanager restart
+
+# Wait for NetworkManager to be fully up
+sleep 5
+
+# Trigger a Wi-Fi scan
+nmcli device wifi rescan
+
+# List available Wi-Fi networks
+nmcli device wifi list
 
 EOF
 
@@ -179,10 +216,19 @@ mkdir -p "$tmp"/usr/sbin
 makefile root:root 0755 "$tmp"/usr/sbin/adduser.sh <<EOF
 #!/bin/sh
 adduser -D -g "Live User" liveuser
-echo "liveuser:password" | chpasswd -e
+
+#encrypted_password=$(openssl passwd -6 "1234")
+#echo "liveuser:$encrypted_password" | chpasswd -e
+#encrypted password is:   password
+
+echo "liveuser:$5$BlpeNVJy5ytCusUs$TxAocxKZ0wD78fUicryMOL7Mo21hisFxEqCewlECSv/" | chpasswd -e
+
 for group in audio video netdev input plugdev users wheel; do
     addgroup liveuser \$group
 done
+
+addgroup root audio
+
 EOF
 
 # Create a firstboot service to add the user
@@ -207,6 +253,26 @@ EOF
 rc_add firstboot default
 
 ## END - Adding User
+
+# audio
+mkdir -p "$tmp"/etc/security/limits.d
+makefile root:root 0644 "$tmp"/etc/security/limits.d/audio.conf <<EOF
+@audio - nice -11
+EOF
+
+
+## Configure liveuser  to doas no password
+# Create doas configuration directory
+mkdir -p "$tmp"/etc/doas.d
+makefile root:root 0400 "$tmp"/etc/doas.d/liveuser.conf <<EOF
+
+# Allow liveuser to use doas without password
+permit nopass keepenv :liveuser
+
+# Optional: Allow liveuser to use doas as root without password
+permit nopass keepenv :liveuser as root
+
+EOF
 
 # branding
 cat > "$tmp"/etc/os-release <<EOF
@@ -236,20 +302,26 @@ makefile root:root 0644 "$tmp"/etc/init.d/plymouth << EOF
 #!/sbin/openrc-run
 
 depend() {
+    need devfs
     before *
-    after bootmisc
+    after mountfs
 }
 
 start() {
     ebegin "Starting Plymouth"
-    /sbin/plymouthd --mode=boot
-    /bin/plymouth show-splash
+    #/usr/sbin/plymouthd --mode=boot
+    #/usr/bin/plymouth show-splash
+
+    plymouth-set-default-theme breeze
+    /usr/sbin/plymouthd --mode=boot --pid-file=/run/plymouth/pid
+    /usr/bin/plymouth show-splash
+
     eend $?
 }
 
 stop() {
     ebegin "Stopping Plymouth"
-    /bin/plymouth quit
+    /usr/bin/plymouth quit
     eend $?
 }
 EOF
@@ -263,25 +335,138 @@ depend() {
 
 start() {
     ebegin "Quitting Plymouth"
-    /bin/plymouth quit
+    /usr/bin/plymouth quit
     eend $?
 }
 EOF
 
-chmod +x "$tmp"/etc/init.d/plymouth "$tmp"/etc/init.d/plymouth-quit
+makefile root:root 0755 "$tmp"/etc/init.d/plymouth-shutdown <<EOF
+#!/sbin/openrc-run
+
+description="Plymouth shutdown screen"
+
+depend() {
+    #after *
+
+    keyword -stop
+    before *
+}
+
+start() {
+    ebegin "Starting Plymouth shutdown screen"
+    /usr/sbin/plymouthd --mode=shutdown
+    /usr/bin/plymouth show-splash
+
+   # /usr/sbin/plymouthd --mode=shutdown
+   # /usr/bin/plymouth show-splash
+    eend $?
+}
+stop() {
+    ebegin "Stopping Plymouth"
+    plymouth quit
+    eend $?
+}
+EOF
+
+chmod +x "$tmp"/etc/init.d/plymouth "$tmp"/etc/init.d/plymouth-quit "$tmp"/etc/init.d/plymouth-shutdown
 
 # Configure Plymouth
 mkdir -p "$tmp"/etc/plymouth
 makefile root:root 0644 "$tmp"/etc/plymouth/plymouthd.conf <<EOF
 [Daemon]
-Theme=spinner
+Theme=breeze
 ShowDelay=0
 DeviceTimeout=8
+QuietPixel=true
 EOF
 
-rc_add plymouth boot
-rc_add plymouth-quit shutdown
+rc_add plymouth sysinit
+rc_add plymouth-quit default
+rc_add plymouth-shutdown shutdown
 
 # Plymouth END
+
+makefile root:root 0644 "$tmp"/etc/inittab <<EOF
+# /etc/inittab
+
+# Start Plymouth immediately
+::sysinit:/usr/sbin/plymouthd --mode=boot --pid-file=/run/plymouth/pid
+::sysinit:/usr/bin/plymouth show-splash
+
+::sysinit:/sbin/openrc sysinit
+::sysinit:/sbin/openrc boot
+::wait:/sbin/openrc default
+
+# Quit Plymouth after OpenRC completes
+::sysinit:/bin/plymouth quit
+
+# Set up a couple of getty's
+tty1::respawn:/sbin/getty 38400 tty1
+tty2::respawn:/sbin/getty 38400 tty2
+tty3::respawn:/sbin/getty 38400 tty3
+tty4::respawn:/sbin/getty 38400 tty4
+tty5::respawn:/sbin/getty 38400 tty5
+tty6::respawn:/sbin/getty 38400 tty6
+
+# Put a getty on the serial port
+#ttyS0::respawn:/sbin/getty -L ttyS0 115200 vt100
+
+# Stuff to do for the 3-finger salute
+::ctrlaltdel:/sbin/reboot
+
+# Stuff to do before rebooting
+::shutdown:/sbin/openrc shutdown
+EOF
+
+
+# Audio
+# 1. Create a new script to set the volume
+
+mkdir -p "$tmp"/usr/local/bin
+makefile root:root 0755 "$tmp"/usr/local/bin/set-default-volume.sh <<EOF
+#!/bin/sh
+
+# Set Master volume to 50%
+amixer -q sset Master 50%
+
+# Unmute Master if it's muted
+amixer -q sset Master unmute
+
+# Set PCM volume to 50% (if available)
+amixer -q sset PCM 50% unmute 2>/dev/null
+
+# Set Speaker volume to 50% (if available)
+amixer -q sset Speaker 50% unmute 2>/dev/null
+
+# Set Headphone volume to 50% (if available)
+amixer -q sset Headphone 50% unmute 2>/dev/null
+
+exit 0
+EOF
+
+# 2. Create an OpenRC service to run this script at boot
+
+mkdir -p "$tmp"/etc/init.d
+makefile root:root 0755 "$tmp"/etc/init.d/set-default-volume <<EOF
+#!/sbin/openrc-run
+
+description="Set default audio volume"
+
+depend() {
+    need alsa
+    after alsa
+}
+
+start() {
+    ebegin "Setting default audio volume"
+    /usr/local/bin/set-default-volume.sh
+    eend $?
+}
+EOF
+
+# 3. Add the new service to the default runlevel
+rc_add set-default-volume default
+
+# ENDS <---
 
 tar -c -C "$tmp" etc usr | gzip -9n > $HOSTNAME.apkovl.tar.gz

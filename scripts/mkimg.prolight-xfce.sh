@@ -2,15 +2,17 @@ build_prolightxfce_setup() {
 	setup-xorg-base xterm
 	setup-devd udev
 	setup-desktop xfce
+	echo "tmp: $tmp"
 }
 
 
 profile_prolightxfce() {
-	profile_standard
+	profile_extended
 	profile_abbrev="plxfce"
 	title="ProLight XFCE"
 	desc="ProLight OS - XFCE"
 	arch="x86_64"
+	kernel_cmdline="splash plymouth.ignore-serial-consoles"
 	boot_addons="amd-ucode intel-ucode"
         initrd_ucode="/boot/amd-ucode.img /boot/intel-ucode.img"
 	apks="$apks alpine-conf xorg-server xf86-input-libinput xinit alpine-conf curl nano vim udev-init-scripts eudev mesa-dri-gallium"
@@ -19,10 +21,10 @@ profile_prolightxfce() {
                 dosfstools ntfs-3g cfdisk xterm
 		linux-firmware-intel linux-firmware-amd
 		xfce4 xfce4-terminal xfce4-screensaver lightdm-gtk-greeter
-		elogind polkit-elogind xterm
+		elogind polkit-elogind xterm wireless-tools
 		gvfs udisks2 gvfs-smb gvfs-fuse fuse-openrc gvfs-nfs gvfs-gphoto2 gvfs-afp
 		networkmanager networkmanager-tui networkmanager-cli network-manager-applet networkmanager-wifi networkmanager-openvpn
-		wpa_supplicant wpa_supplicant-openrc
+		wpa_supplicant wpa_supplicant-openrc plymouth breeze-plymouth networkmanager-dnsmasq
 		firefox pulseaudio pulseaudio-alsa pulseaudio-bluez alsa-plugins-pulse pavucontrol alsa-lib alsa-utils alsaconf
 		"
 
