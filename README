@@ -1,6 +1,25 @@
 Profile Name:- prolightxfce
 alpine script:-   /aports/scripts
 
+git clone --depth=1 https://github.com/alpinelinux/aports.git
+
+custom iso: https://wiki.alpinelinux.org/wiki/How_to_make_a_custom_ISO_image_with_mkimage
+[
+    must do follow steps till:
+    mkdir -pv ~/tmp
+    export TMPDIR=~/tmp
+]
+for signing packages, prompt leave it empty (will automatically installed in its proper location)
+
+wifi:-      https://wiki.alpinelinux.org/wiki/Wi-Fi
+Manualy Settings Required from following:
+setup-xorg-base.sh  https://github.com/alpinelinux/alpine-conf/blob/master/setup-xorg-base.in
+add to startup init.d manually all services used by xorg [rc-update add *], and packages must be included in genapkovl-prolight-xfce.sh  /etc/apk/world
+similar for setup-devd udev:-  https://github.com/alpinelinux/alpine-conf/blob/master/setup-devd.in   
+startup services, and packages udev only
+
+
+
 export PROFILENAME=prolightxfce
 sh mkimage.sh --tag edge \
     --outdir ~/iso \
@@ -9,3 +28,14 @@ sh mkimage.sh --tag edge \
     --repository https://dl-cdn.alpinelinux.org/alpine/edge/community \
     --profile $PROFILENAME
 
+1 - XFCE Fully Work
+2 - LAN Network is working
+3 - Plymouth Integrated
+4 - Final iso size 1.2 GB
+5 - Full functional XFCE desktop minimum size: 540 MB to 720 MB
+
+
+issues:
+1. Plymouth properly not working (not showing splash screen, maybe due to timeout or theme issue)
+2. Wifi not detecting (means wireless connections SSIDs not available to connect to)
+3. Some password issues with liveuser
